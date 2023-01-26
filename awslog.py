@@ -15,7 +15,6 @@ try:
     from rich.theme import Theme
 
     console = Console()
-    print = console.print
 
     USE_RICH = True
 except ImportError:
@@ -126,9 +125,7 @@ class ZappaCLI:
             type=str,
             help="The identifier of the cloudwatch log group.",
         )
-        parser.add_argument(
-            "--no-color", action="store_true", help="Don't color log tail output."
-        )
+
         parser.add_argument(
             "--http",
             action="store_true",
@@ -149,11 +146,6 @@ class ZappaCLI:
             "--filter", type=str, default="", help="Apply a filter pattern to the logs."
         )
         parser.add_argument(
-            "--force-color",
-            action="store_true",
-            help="Force coloring log tail output even if coloring support is not auto-detected. (example: piping)",
-        )
-        parser.add_argument(
             "--disable-keep-open",
             action="store_true",
             help="Exit after printing the last available log, rather than keeping the log open.",
@@ -169,7 +161,6 @@ class ZappaCLI:
             non_http=self.vargs["non_http"],
             since=self.vargs["since"],
             filter_pattern=self.vargs["filter"],
-            force_colorize=self.vargs["force_color"] or None,
             keep_open=not self.vargs["disable_keep_open"],
         )
 
@@ -265,7 +256,6 @@ class ZappaCLI:
         colorize=True,
         http=False,
         non_http=False,
-        force_colorize=False,
     ):
         """
         Tail this function's logs.
@@ -300,11 +290,9 @@ class ZappaCLI:
                                 colorize,
                                 http,
                                 non_http,
-                                force_colorize,
                             )
                         same_timestamp_logs = []
                         current_timestamp = log["timestamp"]
-                    # self.print_logs([log], colorize, http, non_http, force_colorize)
 
                 if not keep_open:
                     break
@@ -334,13 +322,9 @@ class ZappaCLI:
         return False
 
     def print_divider(self, timestamp=0):
-        timestamp_str = datetime.datetime.fromtimestamp(timestamp / 1000).strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
-
         if USE_RICH:
             divider = Rule(style=Style(color="gray50"), align="left")
-            print(divider)
+            console.print(divider)
 
         else:
             print("\033[1;30m" + "─" * 80 + "\033[0m")
@@ -348,7 +332,11 @@ class ZappaCLI:
         self._printed_divider_before = True
 
     def print_logs(
-        self, logs, colorize=True, http=False, non_http=False, force_colorize=None
+        self,
+        logs,
+        colorize=True,
+        http=False,
+        non_http=False,
     ):
         """
         Parse, filter and print logs to the console.
@@ -366,7 +354,7 @@ class ZappaCLI:
             )
 
             if USE_RICH:
-                print(f"[{timestamp_str}]", message, end="")
+                console.print(f"[{timestamp_str}]", message, end="")
             else:
                 print(f"\033[1m\033[36m[{timestamp_str}]\033[0m", end=" ")
                 print(message, end="")
