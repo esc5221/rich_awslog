@@ -150,6 +150,12 @@ class ZappaCLI:
             action="store_true",
             help="Exit after printing the last available log, rather than keeping the log open.",
         )
+        parser.add_argument(
+            "-e",
+            "--exact",
+            action="store_true",
+            help="Use identifier as an exact match.",
+        )
 
         args = parser.parse_args(argv)
         self.vargs = vars(args)
@@ -162,7 +168,78 @@ class ZappaCLI:
             since=self.vargs["since"],
             filter_pattern=self.vargs["filter"],
             keep_open=not self.vargs["disable_keep_open"],
+            exact=self.vargs["exact"],
         )
+
+    def tail(
+        self,
+        identifier,
+        since,
+        filter_pattern,
+        limit=10000,
+        keep_open=True,
+        colorize=True,
+        http=False,
+        non_http=False,
+        exact=False,
+    ):
+        """
+        Tail this function's logs.
+        if keep_open, do so repeatedly, printing any new logs
+        """
+        log_group_name = identifier
+        if not exact:
+            log_group_name = self.find_log_group(identifier)
+
+        try:
+            since_stamp = string_to_timestamp(since) * 1000
+            last_since = since_stamp
+            while True:
+                new_logs = self.fetch_logs(
+                    log_group_name=log_group_name,
+                    filter_pattern=filter_pattern,
+                    limit=limit,
+                    start_time=last_since,
+                )
+                # print("last_since\t", last_since)
+                # print("len new_logs", len(new_logs))
+
+                new_logs = [e for e in new_logs if e["timestamp"] > last_since]
+
+                current_timestamp = 0
+                same_timestamp_logs = []
+                for log in new_logs:
+                    if log["timestamp"] == current_timestamp:
+                        same_timestamp_logs.append(log)
+                    else:
+                        if same_timestamp_logs:
+                            if self._printed_divider_before == False:
+                                self.print_divider(timestamp=log["timestamp"])
+                            self.print_logs(
+                                same_timestamp_logs,
+                                colorize,
+                                http,
+                                non_http,
+                            )
+                        same_timestamp_logs = []
+                        current_timestamp = log["timestamp"]
+
+                if not keep_open:
+                    break
+                if new_logs:
+                    last_since = new_logs[-1]["timestamp"]
+
+                print("_", end="\r")
+                time.sleep(1)
+        except KeyboardInterrupt:  # pragma: no cover
+            # Die gracefully
+            try:
+                sys.exit(0)
+            except SystemExit:
+                os._exit(130)
+
+    def on_exit(self):
+        pass
 
     # added
     def find_log_group(self, identifier):
@@ -227,7 +304,6 @@ class ZappaCLI:
 
             # Amazon uses millisecond epoch for some reason.
             # Thanks, Jeff.
-            start_time = start_time * 1000
             end_time = int(time.time()) * 1000
 
             response = self.logs_client.filter_log_events(
@@ -245,69 +321,6 @@ class ZappaCLI:
                 events += response["events"]
 
         return sorted(events, key=lambda k: k["timestamp"])
-
-    def tail(
-        self,
-        identifier,
-        since,
-        filter_pattern,
-        limit=10000,
-        keep_open=True,
-        colorize=True,
-        http=False,
-        non_http=False,
-    ):
-        """
-        Tail this function's logs.
-        if keep_open, do so repeatedly, printing any new logs
-        """
-        log_group_name = self.find_log_group(identifier)
-
-        try:
-            since_stamp = string_to_timestamp(since)
-            last_since = since_stamp
-            while True:
-                new_logs = self.fetch_logs(
-                    log_group_name=log_group_name,
-                    filter_pattern=filter_pattern,
-                    limit=limit,
-                    start_time=last_since,
-                )
-
-                new_logs = [e for e in new_logs if e["timestamp"] > last_since]
-
-                current_timestamp = 0
-                same_timestamp_logs = []
-                for log in new_logs:
-                    if log["timestamp"] == current_timestamp:
-                        same_timestamp_logs.append(log)
-                    else:
-                        if same_timestamp_logs:
-                            if self._printed_divider_before == False:
-                                self.print_divider(timestamp=log["timestamp"])
-                            self.print_logs(
-                                same_timestamp_logs,
-                                colorize,
-                                http,
-                                non_http,
-                            )
-                        same_timestamp_logs = []
-                        current_timestamp = log["timestamp"]
-
-                if not keep_open:
-                    break
-                if new_logs:
-                    last_since = new_logs[-1]["timestamp"]
-                time.sleep(1)
-        except KeyboardInterrupt:  # pragma: no cover
-            # Die gracefully
-            try:
-                sys.exit(0)
-            except SystemExit:
-                os._exit(130)
-
-    def on_exit(self):
-        pass
 
     def is_metadata_log(self, message):
         """
@@ -345,6 +358,7 @@ class ZappaCLI:
         for log in logs:
             timestamp = log["timestamp"]
             message = log["message"]
+            # print("||", message[:100])
             if self.is_metadata_log(message):
                 has_metadata_logs = True
                 continue
