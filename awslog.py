@@ -1,24 +1,20 @@
 import argparse
 import calendar
 import datetime
+import json
 import os
 import re
 import sys
 import time
 
-USE_RICH = False
-try:
-    import rich
-    from rich.console import Console
-    from rich.rule import Rule
-    from rich.style import Style
-    from rich.theme import Theme
+import rich
+from rich.console import Console
+from rich.rule import Rule
+from rich.style import Style
+from rich.theme import Theme
+from rich.padding import Padding
 
-    console = Console()
-
-    USE_RICH = True
-except ImportError:
-    pass
+console = Console()
 
 import boto3
 
@@ -120,22 +116,13 @@ class ZappaCLI:
 
         desc = "Tailing AWS CloudWatch Logs"
         parser = argparse.ArgumentParser(description=desc)
+
         parser.add_argument(
             "identifier",
             type=str,
             help="The identifier of the cloudwatch log group.",
         )
 
-        parser.add_argument(
-            "--http",
-            action="store_true",
-            help="Only show HTTP requests in tail output.",
-        )
-        parser.add_argument(
-            "--non-http",
-            action="store_true",
-            help="Only show non-HTTP requests in tail output.",
-        )
         parser.add_argument(
             "--since",
             type=str,
@@ -156,15 +143,19 @@ class ZappaCLI:
             action="store_true",
             help="Use identifier as an exact match.",
         )
+        parser.add_argument(
+            "-s",
+            "--set",
+            action="store_true",
+            help="Use identifier as log set name.",
+        )
 
         args = parser.parse_args(argv)
         self.vargs = vars(args)
 
         self.tail(
             identifier=self.vargs["identifier"],
-            colorize=True,
-            http=self.vargs["http"],
-            non_http=self.vargs["non_http"],
+            use_set=self.vargs["set"],
             since=self.vargs["since"],
             filter_pattern=self.vargs["filter"],
             keep_open=not self.vargs["disable_keep_open"],
@@ -178,58 +169,62 @@ class ZappaCLI:
         filter_pattern,
         limit=10000,
         keep_open=True,
-        colorize=True,
-        http=False,
-        non_http=False,
         exact=False,
+        use_set=False,
     ):
         """
         Tail this function's logs.
         if keep_open, do so repeatedly, printing any new logs
         """
-        log_group_name = identifier
-        if not exact:
+        if exact and not use_set:
+            log_group_name = identifier
+        elif not exact and not use_set:
             log_group_name = self.find_log_group(identifier)
+        elif use_set:
+            log_group_names = self.get_log_group_names_from_log_set(identifier)
+        else:
+            raise Exception("Invalid combination of arguments.")
 
         try:
             since_stamp = string_to_timestamp(since) * 1000
             last_since = since_stamp
             while True:
-                new_logs = self.fetch_logs(
-                    log_group_name=log_group_name,
-                    filter_pattern=filter_pattern,
-                    limit=limit,
-                    start_time=last_since,
-                )
-                # print("last_since\t", last_since)
-                # print("len new_logs", len(new_logs))
+                if not use_set:
+                    new_logs = self.fetch_logs(
+                        log_group_name=log_group_name,
+                        filter_pattern=filter_pattern,
+                        limit=limit,
+                        start_time=last_since,
+                    )
+                else:
+                    new_logs = []
+                    for log_group_name in log_group_names:
+                        new_logs_of_group = self.fetch_logs(
+                            log_group_name=log_group_name,
+                            filter_pattern=filter_pattern,
+                            limit=limit,
+                            start_time=last_since,
+                        )
+
+                        for log in new_logs_of_group:
+                            log["log_group_name"] = log_group_name
+
+                        new_logs.extend(new_logs_of_group)
 
                 new_logs = [e for e in new_logs if e["timestamp"] > last_since]
 
-                current_timestamp = 0
-                same_timestamp_logs = []
-                for log in new_logs:
-                    if log["timestamp"] == current_timestamp:
-                        same_timestamp_logs.append(log)
-                    else:
-                        if same_timestamp_logs:
-                            if self._printed_divider_before == False:
-                                self.print_divider(timestamp=log["timestamp"])
-                            self.print_logs(
-                                same_timestamp_logs,
-                                colorize,
-                                http,
-                                non_http,
-                            )
-                        same_timestamp_logs = []
-                        current_timestamp = log["timestamp"]
+                self.print_logs(
+                    new_logs,
+                )
+
+                last_since = (
+                    max([e["timestamp"] for e in new_logs]) if new_logs else last_since
+                )
 
                 if not keep_open:
                     break
-                if new_logs:
-                    last_since = new_logs[-1]["timestamp"]
+                # if new_logs:
 
-                print("_", end="\r")
                 time.sleep(1)
         except KeyboardInterrupt:  # pragma: no cover
             # Die gracefully
@@ -253,14 +248,11 @@ class ZappaCLI:
         for page in paginator.paginate():
             log_groups.extend(page["logGroups"])
 
-        print(f"Found {len(log_groups)} log groups")
-
         candidates = []
         for log_group in log_groups:
             if identifier in log_group["logGroupName"]:
                 candidates.append(log_group)
 
-        print(f"Found {len(candidates)} log groups matching {identifier}")
         for i, candidate in enumerate(candidates):
             print(f"\033[36m[{i}]\033[0m \033[32m{candidate['logGroupName']}\033[0m")
 
@@ -334,47 +326,86 @@ class ZappaCLI:
             return True
         return False
 
-    def print_divider(self, timestamp=0):
-        if USE_RICH:
-            divider = Rule(style=Style(color="gray50"), align="left")
-            console.print(divider)
-
-        else:
-            print("\033[1;30m" + "─" * 80 + "\033[0m")
-
-        self._printed_divider_before = True
+    def print_divider(self, indicator_color="gray50"):
+        rule_width = console.width - 8
+        divider = "[gray50]" + "─" * rule_width + "[/]"
+        console.print(f"[on {indicator_color}]" + " " * 4 + "[/]", end="")
+        console.print(divider)
 
     def print_logs(
         self,
         logs,
-        colorize=True,
-        http=False,
-        non_http=False,
     ):
         """
         Parse, filter and print logs to the console.
         """
         has_metadata_logs = False
+        last_timestamp = 0
+        last_log_group_color = None
         for log in logs:
             timestamp = log["timestamp"]
             message = log["message"]
-            # print("||", message[:100])
+
+            log_group_name = log.get("log_group_name", None)
+
             if self.is_metadata_log(message):
                 has_metadata_logs = True
                 continue
 
+            if last_timestamp < timestamp:
+                self.print_divider(last_log_group_color)
+
             timestamp_str = datetime.datetime.fromtimestamp(timestamp / 1000).strftime(
-                "%Y-%m-%d %H:%M:%S"
+                "%y-%m-%d %H:%M:%S"
             )
 
-            if USE_RICH:
-                console.print(f"[{timestamp_str}]", message, end="")
-            else:
-                print(f"\033[1m\033[36m[{timestamp_str}]\033[0m", end=" ")
-                print(message, end="")
+            log_group_index = 0 if "dev" in log_group_name else 1
+            log_group_color = "green" if log_group_index == 0 else "blue"
 
-        if not has_metadata_logs:
-            self._printed_divider_before = False
+            if last_log_group_color != log_group_color:
+                self.print_divider(log_group_color)
+                last_log_group_color = log_group_color
+
+            # print background as log group color
+            for i in range(0, len(message), console.width - 40):
+                console.print(f"[on {log_group_color}]" + " " * 4 + "[/]", end="")
+                console.print(
+                    f"\[{timestamp_str}]",
+                    message[i : i + console.width - 40],
+                    end="",
+                )
+                if i + console.width - 40 < len(message):
+                    console.print()
+
+            # console.print(
+            #     f"[{timestamp_str}]",
+            #     message,
+            #     end="",
+            #     overflow="ignore",
+            # )
+            last_timestamp = timestamp
+
+    def load_config(self):
+        """
+        Load the config file.
+        """
+        config_path = (
+            os.path.dirname(os.path.realpath(__file__)) + "/.awslog_config.json"
+        )
+        if not os.path.exists(config_path):
+            return {}
+
+        with open(config_path, "r") as f:
+            return json.load(f)
+
+    def get_log_group_names_from_log_set(self, log_set_name):
+        config = self.load_config()
+        if log_set_name not in config:
+            raise Exception(f"Log set {log_set_name} not found in config file")
+        log_set = config[log_set_name]
+        log_group_names = log_set["log_groups"]
+
+        return log_group_names
 
 
 def handle():  # pragma: no cover
@@ -386,6 +417,11 @@ def handle():  # pragma: no cover
             file_path = os.path.dirname(os.path.realpath(__file__))
             print("add below alias to ~/.zshrc or ~/.bashrc\n")
             print(f"alias awslog='python3 {file_path}/awslog.py'")
+            print()
+            print(
+                "You can define custom log set in below file and tail merged logs with `awslog <log set name> -s`"
+            )
+            print(f"{file_path}/.awslog_config.json")
             print()
             return
     except Exception:
