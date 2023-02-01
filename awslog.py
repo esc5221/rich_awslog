@@ -339,7 +339,6 @@ class ZappaCLI:
         """
         Parse, filter and print logs to the console.
         """
-        has_metadata_logs = False
         last_timestamp = 0
         last_log_group_color = None
         for log in logs:
@@ -349,7 +348,6 @@ class ZappaCLI:
             log_group_name = log.get("log_group_name", None)
 
             if self.is_metadata_log(message):
-                has_metadata_logs = True
                 continue
 
             if last_timestamp < timestamp:
@@ -359,16 +357,18 @@ class ZappaCLI:
                 "%y-%m-%d %H:%M:%S"
             )
 
-            log_group_index = 0 if "dev" in log_group_name else 1
-            log_group_color = "green" if log_group_index == 0 else "blue"
+            if log_group_name:
+                log_group_index = 0 if "dev" in log_group_name else 1
+                log_group_color = "green" if log_group_index == 0 else "blue"
 
-            if last_log_group_color != log_group_color:
-                self.print_divider(log_group_color)
-                last_log_group_color = log_group_color
+                if last_log_group_color != log_group_color:
+                    self.print_divider(log_group_color)
+                    last_log_group_color = log_group_color
 
             # print background as log group color
             for i in range(0, len(message), console.width - 40):
-                console.print(f"[on {log_group_color}]" + " " * 4 + "[/]", end="")
+                if log_group_name:
+                    console.print(f"[on {log_group_color}]" + " " * 4 + "[/]", end="")
                 console.print(
                     f"\[{timestamp_str}]",
                     message[i : i + console.width - 40],
@@ -377,12 +377,6 @@ class ZappaCLI:
                 if i + console.width - 40 < len(message):
                     console.print()
 
-            # console.print(
-            #     f"[{timestamp_str}]",
-            #     message,
-            #     end="",
-            #     overflow="ignore",
-            # )
             last_timestamp = timestamp
 
     def load_config(self):
