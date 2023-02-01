@@ -211,6 +211,8 @@ class ZappaCLI:
 
                         new_logs.extend(new_logs_of_group)
 
+                    new_logs = sorted(new_logs, key=lambda k: k["timestamp"])
+
                 new_logs = [e for e in new_logs if e["timestamp"] > last_since]
 
                 self.print_logs(
