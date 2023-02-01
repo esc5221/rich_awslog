@@ -106,7 +106,11 @@ class ZappaCLI:
 
     def __init__(self):
         self.logs_client = boto3.client("logs")
+
+        self.last_log_group_color = "gray50"
         self._printed_divider_before = False
+
+        self.config = self.load_config()
 
     def handle(self, argv=None):
         """
@@ -181,7 +185,8 @@ class ZappaCLI:
         elif not exact and not use_set:
             log_group_name = self.find_log_group(identifier)
         elif use_set:
-            log_group_names = self.get_log_group_names_from_log_set(identifier)
+            self.log_set_name = identifier
+            log_group_names = self.get_log_group_names_from_log_set()
         else:
             raise Exception("Invalid combination of arguments.")
 
@@ -328,10 +333,41 @@ class ZappaCLI:
             return True
         return False
 
+    def build_indicator_string(self, color, index, max_index, width=4):
+        """
+        Build the indicator string for a given index.
+        1:
+            "[COLOR]    "
+        2:
+            "  [COLOR]  "
+        3:
+            "    [COLOR]"
+        """
+        # "\033[49m" equivalent to "[/]"
+        default_color_str = "[on default]"
+        color_str = f"[on {color}]"
+        indicator_str = (
+            default_color_str
+            + " " * index * width
+            + "[/]"
+            + color_str
+            + " " * width
+            + "[/]"
+            + default_color_str
+            + (" " * (max_index - index - 1) * width)
+            + "[/]"
+        )
+        return indicator_str
+
     def print_divider(self, indicator_color="gray50"):
         rule_width = console.width - 8
         divider = "[gray50]" + "─" * rule_width + "[/]"
-        console.print(f"[on {indicator_color}]" + " " * 4 + "[/]", end="")
+        if getattr(self, "last_indicator_str", None) is None:
+            console.print(f"[on {indicator_color}]" + " " * 2 + "[/]", end="")
+        else:
+            console.print(
+                f"[on {indicator_color}]" + self.last_indicator_str + "[/]", end=""
+            )
         console.print(divider)
 
     def print_logs(
@@ -342,7 +378,6 @@ class ZappaCLI:
         Parse, filter and print logs to the console.
         """
         last_timestamp = 0
-        last_log_group_color = None
         for log in logs:
             timestamp = log["timestamp"]
             message = log["message"]
@@ -353,30 +388,44 @@ class ZappaCLI:
                 continue
 
             if last_timestamp < timestamp:
-                self.print_divider(last_log_group_color)
+                self.print_divider(self.last_log_group_color)
 
             timestamp_str = datetime.datetime.fromtimestamp(timestamp / 1000).strftime(
                 "%y-%m-%d %H:%M:%S"
             )
 
             if log_group_name:
-                log_group_index = 0 if "dev" in log_group_name else 1
-                log_group_color = "green" if log_group_index == 0 else "blue"
+                log_group_index, len_log_group = self.get_log_group_index(
+                    log_group_name=log_group_name
+                )
 
-                if last_log_group_color != log_group_color:
+                log_group_color = (
+                    f"color({log_group_index+1})"  # rich.ansi.SGR_STYLE_MAP
+                )
+
+                if self.last_log_group_color != log_group_color:
                     self.print_divider(log_group_color)
-                    last_log_group_color = log_group_color
+                    self.last_log_group_color = log_group_color
 
             # print background as log group color
-            for i in range(0, len(message), console.width - 40):
+            for i in range(0, len(message), console.width - 48):
                 if log_group_name:
-                    console.print(f"[on {log_group_color}]" + " " * 4 + "[/]", end="")
+                    indicator_str = self.build_indicator_string(
+                        color=log_group_color,
+                        index=log_group_index,
+                        max_index=len_log_group,
+                        width=2,
+                    )
+                    self.last_indicator_str = indicator_str
+                    console.print(
+                        f"[on {log_group_color}]" + indicator_str + "[/]", end=""
+                    )
                 console.print(
                     f"\[{timestamp_str}]",
-                    message[i : i + console.width - 40],
+                    message[i : i + console.width - 48],
                     end="",
                 )
-                if i + console.width - 40 < len(message):
+                if i + console.width - 48 < len(message):
                     console.print()
 
             last_timestamp = timestamp
@@ -394,14 +443,19 @@ class ZappaCLI:
         with open(config_path, "r") as f:
             return json.load(f)
 
-    def get_log_group_names_from_log_set(self, log_set_name):
-        config = self.load_config()
-        if log_set_name not in config:
-            raise Exception(f"Log set {log_set_name} not found in config file")
-        log_set = config[log_set_name]
-        log_group_names = log_set["log_groups"]
+    def get_log_group_names_from_log_set(self):
+        if self.log_set_name not in self.config:
+            raise Exception(f"Log set {self.log_set_name} not found in config file")
+        log_set = self.config[self.log_set_name]
+        log_group_names = [log_group["name"] for log_group in log_set["log_groups"]]
 
         return log_group_names
+
+    def get_log_group_index(self, log_group_name):
+        log_set = self.config[self.log_set_name]
+        log_group_names = [log_group["name"] for log_group in log_set["log_groups"]]
+
+        return log_group_names.index(log_group_name), len(log_group_names)
 
 
 def handle():  # pragma: no cover
