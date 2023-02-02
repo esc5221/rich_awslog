@@ -359,11 +359,12 @@ class ZappaCLI:
         )
         return indicator_str
 
-    def print_divider(self, indicator_color="gray50"):
+    def print_divider(self, indicator_color="default"):
         rule_width = console.width - 8
         divider = "[gray50]" + "─" * rule_width + "[/]"
         if getattr(self, "last_indicator_str", None) is None:
-            console.print(f"[on {indicator_color}]" + " " * 2 + "[/]", end="")
+            # console.print(f"[on {indicator_color}]" + " " * 2 + "[/]", end="")
+            console.print(f"[on default]" + " " * 2 + "[/]", end="")
         else:
             console.print(
                 f"[on {indicator_color}]" + self.last_indicator_str + "[/]", end=""
