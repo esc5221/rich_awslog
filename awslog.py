@@ -395,6 +395,8 @@ class ZappaCLI:
             )
 
             if log_group_name:
+                log_group_alias = self.get_log_group_alias(log_group_name)
+
                 log_group_index, len_log_group = self.get_log_group_index(
                     log_group_name=log_group_name
                 )
@@ -404,11 +406,18 @@ class ZappaCLI:
                 )
 
                 if self.last_log_group_color != log_group_color:
-                    self.print_divider(log_group_color)
+                    # self.print_divider(log_group_color)
+                    alias_str = f"[bold {log_group_color}]{log_group_alias}[/]"
+                    rule = Rule(
+                        f"[bold {log_group_color}]\[{log_group_alias}][/]",
+                        align="left",
+                        style=log_group_color,
+                    )
+                    console.print(alias_str)
                     self.last_log_group_color = log_group_color
 
             # print background as log group color
-            for i in range(0, len(message), console.width - 48):
+            for i in range(0, len(message), console.width - 60):
                 if log_group_name:
                     indicator_str = self.build_indicator_string(
                         color=log_group_color,
@@ -422,10 +431,10 @@ class ZappaCLI:
                     )
                 console.print(
                     f"\[{timestamp_str}]",
-                    message[i : i + console.width - 48],
+                    message[i : i + console.width - 60],
                     end="",
                 )
-                if i + console.width - 48 < len(message):
+                if i + console.width - 60 < len(message):
                     console.print()
 
             last_timestamp = timestamp
@@ -456,6 +465,12 @@ class ZappaCLI:
         log_group_names = [log_group["name"] for log_group in log_set["log_groups"]]
 
         return log_group_names.index(log_group_name), len(log_group_names)
+
+    def get_log_group_alias(self, log_group_name):
+        log_set = self.config[self.log_set_name]
+        log_group_names = [log_group["name"] for log_group in log_set["log_groups"]]
+
+        return log_set["log_groups"][log_group_names.index(log_group_name)]["alias"]
 
 
 def handle():  # pragma: no cover
