@@ -1,3 +1,7 @@
+# rich_awslog
+
+-   Tailing AWS CloudWatch Logs, using Zappa tail and rich print.
+
 ### Install
 
 ```bash
