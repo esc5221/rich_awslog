@@ -6,6 +6,8 @@
 
 ```bash
 git clone https://github.com/esc5221/rich_awslog
+cd rich_awslog
+pip install -r requirements.txt
 ```
 
 ### Setup
