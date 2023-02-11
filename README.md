@@ -55,6 +55,7 @@ positional arguments:
 options:
   -h, --help           show this help message and exit
   --since SINCE        Only show lines since a certain timeframe.
+  --to TO              Only show lines before a certain timeframe.
   --filter FILTER      Apply a filter pattern to the logs.
   --disable-keep-open  Exit after printing the last available log, rather than keeping the log open.
   -e, --exact          Use identifier as an exact match.
