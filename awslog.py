@@ -134,6 +134,13 @@ class ZappaCLI:
             help="Only show lines since a certain timeframe.",
         )
         parser.add_argument(
+            "--to",
+            type=str,
+            default=None,
+            help="Only show lines before a certain timeframe.",
+        )
+
+        parser.add_argument(
             "--filter", type=str, default="", help="Apply a filter pattern to the logs."
         )
         parser.add_argument(
@@ -161,6 +168,7 @@ class ZappaCLI:
             identifier=self.vargs["identifier"],
             use_set=self.vargs["set"],
             since=self.vargs["since"],
+            to=self.vargs["to"],
             filter_pattern=self.vargs["filter"],
             keep_open=not self.vargs["disable_keep_open"],
             exact=self.vargs["exact"],
@@ -170,6 +178,7 @@ class ZappaCLI:
         self,
         identifier,
         since,
+        to,
         filter_pattern,
         limit=10000,
         keep_open=True,
@@ -192,6 +201,7 @@ class ZappaCLI:
 
         try:
             since_stamp = string_to_timestamp(since) * 1000
+            to_stamp = string_to_timestamp(to) * 1000 if to else None
             last_since = since_stamp
             while True:
                 if not use_set:
@@ -200,6 +210,7 @@ class ZappaCLI:
                         filter_pattern=filter_pattern,
                         limit=limit,
                         start_time=last_since,
+                        end_time=to_stamp,
                     )
                 else:
                     new_logs = []
@@ -209,6 +220,7 @@ class ZappaCLI:
                             filter_pattern=filter_pattern,
                             limit=limit,
                             start_time=last_since,
+                            end_time=to_stamp,
                         )
 
                         for log in new_logs_of_group:
@@ -228,9 +240,8 @@ class ZappaCLI:
                     max([e["timestamp"] for e in new_logs]) if new_logs else last_since
                 )
 
-                if not keep_open:
+                if (not keep_open) or (to is not None):
                     break
-                # if new_logs:
 
                 time.sleep(1)
         except KeyboardInterrupt:  # pragma: no cover
@@ -288,7 +299,14 @@ class ZappaCLI:
         log_stream_names = [stream["logStreamName"] for stream in all_streams]
         return log_stream_names
 
-    def fetch_logs(self, log_group_name, filter_pattern="", limit=100000, start_time=0):
+    def fetch_logs(
+        self,
+        log_group_name,
+        filter_pattern="",
+        limit=100000,
+        start_time=0,
+        end_time=None,
+    ):
         """
         Fetch the CloudWatch logs for a given Lambda name.
         """
@@ -301,9 +319,8 @@ class ZappaCLI:
             if "nextToken" in response:
                 extra_args["nextToken"] = response["nextToken"]
 
-            # Amazon uses millisecond epoch for some reason.
-            # Thanks, Jeff.
-            end_time = int(time.time()) * 1000
+            if not end_time:
+                end_time = int(time.time()) * 1000
 
             response = self.logs_client.filter_log_events(
                 logGroupName=log_group_name,
