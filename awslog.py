@@ -85,9 +85,10 @@ def string_to_timestamp(timestring):
         delta = durationpy_from_str(timestring)
         past = datetime.datetime.now(datetime.timezone.utc) - delta
         ts = calendar.timegm(past.timetuple())
-        return ts
     except Exception:
-        pass
+        # input format : YY-MM-DD HH:MM:SS
+        past = datetime.datetime.strptime(timestring, "%Y-%m-%d/%H:%M:%S").timetuple()
+        ts = int(datetime.datetime(*past[:6]).timestamp())
 
     if ts:
         return ts
@@ -160,6 +161,12 @@ class ZappaCLI:
             action="store_true",
             help="Use identifier as log set name.",
         )
+        parser.add_argument(
+            "-p",
+            "--use-paginate",
+            action="store_true",
+            help="Use paginate to search log streams more than 50.",
+        )
 
         args = parser.parse_args(argv)
         self.vargs = vars(args)
@@ -172,6 +179,7 @@ class ZappaCLI:
             filter_pattern=self.vargs["filter"],
             keep_open=not self.vargs["disable_keep_open"],
             exact=self.vargs["exact"],
+            use_paginate=self.vargs["use_paginate"],
         )
 
     def tail(
@@ -184,6 +192,7 @@ class ZappaCLI:
         keep_open=True,
         exact=False,
         use_set=False,
+        use_paginate=False,
     ):
         """
         Tail this function's logs.
@@ -211,6 +220,7 @@ class ZappaCLI:
                         limit=limit,
                         start_time=last_since,
                         end_time=to_stamp,
+                        use_paginate=use_paginate,
                     )
                 else:
                     new_logs = []
@@ -221,6 +231,7 @@ class ZappaCLI:
                             limit=limit,
                             start_time=last_since,
                             end_time=to_stamp,
+                            use_paginate=use_paginate,
                         )
 
                         for log in new_logs_of_group:
@@ -243,7 +254,7 @@ class ZappaCLI:
                 if (not keep_open) or (to is not None):
                     break
 
-                time.sleep(1)
+                time.sleep(2)
         except KeyboardInterrupt:  # pragma: no cover
             # Die gracefully
             try:
@@ -290,12 +301,50 @@ class ZappaCLI:
 
         return candidates[choice]["logGroupName"]
 
-    def fetch_log_stream_names(self, log_group_name):
+    def _fetch_log_stream_names_single(self, log_group_name, start_time, end_time):
         streams = self.logs_client.describe_log_streams(
-            logGroupName=log_group_name, descending=True, orderBy="LastEventTime"
+            logGroupName=log_group_name,
+            descending=True,
+            orderBy="LastEventTime",
+            limit=50,
         )
 
         all_streams = streams["logStreams"]
+        log_stream_names = [stream["logStreamName"] for stream in all_streams]
+        return log_stream_names
+
+    def _fetch_log_stream_names_paginated(self, log_group_name, start_time, end_time):
+        paginator = self.logs_client.get_paginator("describe_log_streams")
+        all_streams = []
+        for page in paginator.paginate(
+            logGroupName=log_group_name, orderBy="LastEventTime", descending=True
+        ):
+            print(
+                f"page: {len(page['logStreams'])}",
+                "start_event",
+                datetime.datetime.fromtimestamp(
+                    page["logStreams"][0]["firstEventTimestamp"] / 1000
+                ),
+                "end_event",
+                datetime.datetime.fromtimestamp(
+                    page["logStreams"][-1]["lastEventTimestamp"] / 1000
+                ),
+            )
+            # check if first stream's firstEvent is before start time
+            if start_time and len(page["logStreams"]) > 0:
+                first_stream = page["logStreams"][0]
+                if first_stream["firstEventTimestamp"] < start_time:
+                    break
+
+            # check if last stream's lastEvent is after end time
+            if end_time and len(page["logStreams"]) > 0:
+                last_stream = page["logStreams"][-1]
+                if last_stream["lastEventTimestamp"] > end_time:
+                    continue
+
+            all_streams.extend(page["logStreams"])
+
+        print(f"Found {len(all_streams)} log streams.")
         log_stream_names = [stream["logStreamName"] for stream in all_streams]
         return log_stream_names
 
@@ -306,6 +355,7 @@ class ZappaCLI:
         limit=100000,
         start_time=0,
         end_time=None,
+        use_paginate=False,
     ):
         """
         Fetch the CloudWatch logs for a given Lambda name.
@@ -313,8 +363,14 @@ class ZappaCLI:
 
         events = []
         response = {}
+
+        if use_paginate:
+            fetch_log_stream_names = self._fetch_log_stream_names_paginated
+        else:
+            fetch_log_stream_names = self._fetch_log_stream_names_single
+
         while not response or "nextToken" in response:
-            all_names = self.fetch_log_stream_names(log_group_name)
+            all_names = fetch_log_stream_names(log_group_name, start_time, end_time)
             extra_args = {}
             if "nextToken" in response:
                 extra_args["nextToken"] = response["nextToken"]
@@ -335,6 +391,9 @@ class ZappaCLI:
 
             if response and "events" in response:
                 events += response["events"]
+
+            if end_time:
+                break
 
         return sorted(events, key=lambda k: k["timestamp"])
 
