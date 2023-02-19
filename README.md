@@ -20,6 +20,9 @@ pip install -r requirements.txt
     ___________________________________________________________
     add below alias to ~/.zshrc or ~/.bashrc
 
+    alias awslog='python3 {REPOSITORY_PATH}/rich_awslog/awslog.py'
+
+    ex)
     alias awslog='python3 /Users/esc5221/rich_awslog/awslog.py'
     ```
 
