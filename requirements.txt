@@ -1,11 +1,2 @@
 boto3==1.26.68
-botocore==1.29.68
-jmespath==1.0.1
-markdown-it-py==2.1.0
-mdurl==0.1.2
-Pygments==2.14.0
-python-dateutil==2.8.2
 rich==13.3.1
-s3transfer==0.6.0
-six==1.16.0
-urllib3==1.26.14
