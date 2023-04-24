@@ -506,9 +506,12 @@ class ZappaCLI:
                     console.print(
                         f"[on {log_group_color}]" + indicator_str + "[/]", end=""
                     )
+                cutted_message = message[i : i + console.width - 60]
+                if not cutted_message.endswith("\n"):
+                    cutted_message += "\n"
                 console.print(
                     f"\[{timestamp_str}]",
-                    message[i : i + console.width - 60],
+                    cutted_message,
                     end="",
                 )
                 if i + console.width - 60 < len(message):
