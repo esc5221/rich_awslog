@@ -149,6 +149,12 @@ class ZappaCLI:
             action="store_true",
             help="Exit after printing the last available log, rather than keeping the log open.",
         )
+
+        parser.add_argument(
+            "--no-divider",
+            action="store_true",
+            help="Do not show divider between lines.",
+        )
         parser.add_argument(
             "-e",
             "--exact",
@@ -178,6 +184,7 @@ class ZappaCLI:
             to=self.vargs["to"],
             filter_pattern=self.vargs["filter"],
             keep_open=not self.vargs["disable_keep_open"],
+            no_divider=self.vargs["no_divider"],
             exact=self.vargs["exact"],
             use_paginate=self.vargs["use_paginate"],
         )
@@ -190,6 +197,7 @@ class ZappaCLI:
         filter_pattern,
         limit=10000,
         keep_open=True,
+        no_divider=False,
         exact=False,
         use_set=False,
         use_paginate=False,
@@ -245,6 +253,7 @@ class ZappaCLI:
 
                 self.print_logs(
                     new_logs,
+                    no_divider=no_divider,
                 )
 
                 last_since = (
@@ -409,6 +418,21 @@ class ZappaCLI:
             return True
         return False
 
+    def is_ignore_log(self, message):
+        ignore_in = []
+        #     "OpenBLAS WARNING - could not determine the L2 cache size on this system, assuming 256k",
+        #     "Instancing..",
+        #     "Result of zappa.asynchronous.route_lambda_task:",
+        # ]
+        ignore_exact = ["None"]
+        for ignore in ignore_in:
+            if ignore in message:
+                return True
+
+        for ignore in ignore_exact:
+            if ignore.strip() == message.strip():
+                return True
+
     def build_indicator_string(self, color, index, max_index, width=4):
         """
         Build the indicator string for a given index.
@@ -450,6 +474,7 @@ class ZappaCLI:
     def print_logs(
         self,
         logs,
+        no_divider=False,
     ):
         """
         Parse, filter and print logs to the console.
@@ -461,11 +486,12 @@ class ZappaCLI:
 
             log_group_name = log.get("log_group_name", None)
 
-            if self.is_metadata_log(message):
+            if self.is_metadata_log(message) or self.is_ignore_log(message):
                 continue
 
-            if last_timestamp < timestamp:
-                self.print_divider(self.last_log_group_color)
+            if no_divider == False:
+                if last_timestamp < timestamp:
+                    self.print_divider(self.last_log_group_color)
 
             timestamp_str = datetime.datetime.fromtimestamp(timestamp / 1000).strftime(
                 "%y-%m-%d %H:%M:%S"
